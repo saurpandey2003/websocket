@@ -1,3 +1,11 @@
+# Challenge
+
+Following is the information on the working websocket service. This service is reading data from a stream and publishing it to its clients by managing channels and massaging the data. Also you can subscribe different channels on this websocket and get the access of ticker data on that. You can find more information on this by visiting [here](https://docs.delta.exchange/#public-channels-2). Following are the challanges that needs to be solved.
+
+1. There are multiple bugs in the repository which needs to be found and fixed.
+2. Building correct telemetry around the messages so that we can debug how messages are flowing.
+3. Deploy the service to publicly accessible location.
+
 # Websocket Service
 
 The Websocket Service is a microservice that provides real-time data streaming capabilities for the Cryptovate platform. It connects to external data sources like Delta Exchange via websockets and provides a public-facing websocket API for clients to consume real-time data.

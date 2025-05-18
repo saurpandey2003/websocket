@@ -61,8 +61,8 @@ func LoadConfig(serviceName string) (*Config, error) {
 		ServiceName: serviceName,
 		Environment: "local",
 		LogLevel:    "info",
-		HTTPPort:    8082,
-		GRPCPort:    9090,
+		HTTPPort:    8083,
+		GRPCPort:    9093,
 		Delta: Delta{
 			Enabled:      true,
 			URL:          "wss://socket.india.delta.exchange",
