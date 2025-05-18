@@ -8,7 +8,7 @@ Following is the information on the working websocket service. This service is r
 
 3. **Deployment**: Deploy the service to a publicly accessible location.
 
-Please create a remote branch and submit it back to us and we will get in touch with you as soon as possible.
+**Please create a remote branch and submit it back to us and we will get in touch with you as soon as possible.**
 
 # Websocket Service
 
