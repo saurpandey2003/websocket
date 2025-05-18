@@ -2,9 +2,13 @@
 
 Following is the information on the working websocket service. This service is reading data from a stream and publishing it to its clients by managing channels and massaging the data. Also you can subscribe different channels on this websocket and get the access of ticker data on that. You can find more information on this by visiting [here](https://docs.delta.exchange/#public-channels-2). Following are the challanges that needs to be solved.
 
-1. There are multiple bugs in the repository which needs to be found and fixed.
-2. Building correct telemetry around the messages so that we can debug how messages are flowing.
-3. Deploy the service to publicly accessible location.
+1. **Bug Identification and Resolution**: Identify and fix multiple bugs present in the repository.
+
+2. **Telemetry Implementation**: Build appropriate telemetry around the messages to facilitate debugging of message flow.
+
+3. **Deployment**: Deploy the service to a publicly accessible location.
+
+Please create a remote branch and submit it back to us and we will get in touch with you as soon as possible.
 
 # Websocket Service
 
