@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package websocket.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "websocket/api/v1";
+
+// WebsocketService provides methods for managing websocket connections and subscriptions
+service WebsocketService {
+  // Subscribe subscribes to a channel
+  rpc Subscribe(SubscribeRequest) returns (SubscribeResponse);
+  
+  // Unsubscribe unsubscribes from a channel
+  rpc Unsubscribe(UnsubscribeRequest) returns (google.protobuf.Empty);
+  
+  // GetSubscriptionStatus gets the status of subscriptions
+  rpc GetSubscriptionStatus(GetSubscriptionStatusRequest) returns (GetSubscriptionStatusResponse);
+  
+  // GetConnectionStatus gets the status of connections to external sources
+  rpc GetConnectionStatus(google.protobuf.Empty) returns (ConnectionStatusResponse);
+  
+  // Broadcast broadcasts a message to all clients subscribed to a channel
+  rpc Broadcast(BroadcastRequest) returns (google.protobuf.Empty);
+  
+  // GetStatistics gets statistics about the websocket service
+  rpc GetStatistics(google.protobuf.Empty) returns (StatisticsResponse);
+}
+
+// SubscribeRequest is the request for the Subscribe method
+message SubscribeRequest {
+  // Channel to subscribe to
+  string channel = 1;
+  
+  // Product IDs to filter by
+  repeated string product_ids = 2;
+}
+
+// SubscribeResponse is the response for the Subscribe method
+message SubscribeResponse {
+  // Subscription ID
+  string subscription_id = 1;
+  
+  // Channel subscribed to
+  string channel = 2;
+  
+  // Product IDs filtered by
+  repeated string product_ids = 3;
+  
+  // Time the subscription was created
+  google.protobuf.Timestamp created_at = 4;
+}
+
+// UnsubscribeRequest is the request for the Unsubscribe method
+message UnsubscribeRequest {
+  // Subscription ID to unsubscribe
+  string subscription_id = 1;
+}
+
+// GetSubscriptionStatusRequest is the request for the GetSubscriptionStatus method
+message GetSubscriptionStatusRequest {
+  // Subscription ID to get status for
+  string subscription_id = 1;
+  
+  // Channel to get status for
+  string channel = 2;
+}
+
+// GetSubscriptionStatusResponse is the response for the GetSubscriptionStatus method
+message GetSubscriptionStatusResponse {
+  // Subscriptions
+  repeated Subscription subscriptions = 1;
+}
+
+// Subscription represents a subscription to a channel
+message Subscription {
+  // Subscription ID
+  string subscription_id = 1;
+  
+  // Channel subscribed to
+  string channel = 2;
+  
+  // Product IDs filtered by
+  repeated string product_ids = 3;
+  
+  // Time the subscription was created
+  google.protobuf.Timestamp created_at = 4;
+  
+  // Number of clients subscribed to the channel
+  int32 client_count = 5;
+}
+
+// ConnectionStatusResponse is the response for the GetConnectionStatus method
+message ConnectionStatusResponse {
+  // Connection status by source
+  map<string, ConnectionStatus> connections = 1;
+}
+
+// ConnectionStatus represents the status of a connection to an external source
+message ConnectionStatus {
+  // Whether the connection is established
+  bool connected = 1;
+  
+  // Time the connection was established
+  google.protobuf.Timestamp connected_at = 2;
+  
+  // Number of reconnection attempts
+  int32 reconnect_attempts = 3;
+  
+  // Last error message
+  string last_error = 4;
+  
+  // Time of the last error
+  google.protobuf.Timestamp last_error_at = 5;
+}
+
+// BroadcastRequest is the request for the Broadcast method
+message BroadcastRequest {
+  // Channel to broadcast to
+  string channel = 1;
+  
+  // Message to broadcast
+  bytes message = 2;
+  
+  // Product IDs to filter by
+  repeated string product_ids = 3;
+}
+
+// StatisticsResponse is the response for the GetStatistics method
+message StatisticsResponse {
+  // Number of active connections
+  int32 active_connections = 1;
+  
+  // Number of active subscriptions
+  int32 active_subscriptions = 2;
+  
+  // Number of messages sent
+  int64 messages_sent = 3;
+  
+  // Number of messages received
+  int64 messages_received = 4;
+  
+  // Number of subscriptions by channel
+  map<string, int32> subscriptions_by_channel = 5;
+  
+  // Status of external sources
+  map<string, bool> external_sources = 6;
+}

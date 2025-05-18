@@ -1,0 +1,44 @@
+# Local configuration for the websocket service
+
+# Service configuration
+service_name: websocket-service
+environment: local
+log_level: debug
+http_port: 8080
+grpc_port: 9090
+
+# Websocket configuration
+websocket:
+  read_buffer_size: 1024
+  write_buffer_size: 1024
+  max_message_size: 4096
+  check_origin: false
+  auth:
+    required: false
+    secret: "local-secret-key"
+
+# Security configuration
+security:
+  cors_enabled: true
+  cors_allowed_origins: "*"
+  rate_limit_enabled: false
+  rate_limit_requests: 100
+  rate_limit_duration: 60
+
+# Delta Exchange configuration
+delta:
+  enabled: true
+  url: "wss://socket.india.delta.exchange"
+  channels:
+    - "v2/ticker"
+    - "v2/trades"
+  product_ids:
+    - "BTC_USDT"
+    - "ETH_USDT"
+    - "SOL_USDT"
+  reconnect_max: 5
+
+# Metrics configuration
+metrics:
+  enabled: true
+  endpoint: "/metrics"

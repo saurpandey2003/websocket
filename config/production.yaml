@@ -1,0 +1,52 @@
+# Production configuration for the websocket service
+
+# Service configuration
+service_name: websocket-service
+environment: production
+log_level: info
+http_port: 8080
+grpc_port: 9090
+
+# Websocket configuration
+websocket:
+  read_buffer_size: 8192
+  write_buffer_size: 8192
+  max_message_size: 16384
+  check_origin: true
+  auth:
+    required: true
+    secret: "${WEBSOCKET_AUTH_SECRET}"
+
+# Security configuration
+security:
+  cors_enabled: true
+  cors_allowed_origins: "https://cryptovate.com,https://api.cryptovate.com"
+  rate_limit_enabled: true
+  rate_limit_requests: 500
+  rate_limit_duration: 60
+
+# Delta Exchange configuration
+delta:
+  enabled: true
+  url: "wss://socket.delta.exchange"
+  channels:
+    - "v2/ticker"
+    - "v2/trades"
+    - "v2/l2_orderbook"
+    - "v2/candles"
+  product_ids:
+    - "BTC_USDT"
+    - "ETH_USDT"
+    - "SOL_USDT"
+    - "AVAX_USDT"
+    - "MATIC_USDT"
+    - "DOT_USDT"
+    - "LINK_USDT"
+    - "ADA_USDT"
+    - "XRP_USDT"
+  reconnect_max: 20
+
+# Metrics configuration
+metrics:
+  enabled: true
+  endpoint: "/metrics"
