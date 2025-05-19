@@ -37,9 +37,6 @@ Thumbs.db
 .env
 .env.local
 
-# Generated files
-/gen/
-
 # Log files
 *.log
 
