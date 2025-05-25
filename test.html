@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebSocket Test</title>
+</head>
+<body>
+  <h1>WebSocket Client</h1>
+  <pre id="log"></pre>
+
+  <script>
+    const log = (msg) => {
+      document.getElementById("log").textContent += msg + "\n";
+    };
+
+    const ws = new WebSocket("ws://localhost:8083/ws");
+
+    ws.onopen = () => {
+      log("✅ Connected to WebSocket");
+
+      // Send a sample subscribe message
+      ws.send(JSON.stringify({
+        type: "subscribe",
+        channel: "v2/ticker",
+        product_ids: ["BTCUSD"],
+        payload: {}                          // added the payload
+      }));
+    };
+
+   ws.onmessage = (event) => {
+  console.log("📩 Message received:", event.data);
+};
+
+
+    ws.onerror = (error) => {
+      log("❌ WebSocket error: " + JSON.stringify(error));
+    };
+
+    ws.onclose = () => {
+      log("🔌 WebSocket connection closed");
+    };
+  </script>
+</body>
+</html>

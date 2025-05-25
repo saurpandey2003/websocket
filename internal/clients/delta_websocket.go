@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
-	"github.com/Cryptovate-India/websocket-service/internal/config"
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
+	"github.com/Cryptovate-India/websocket-service/internal/config"
 )
 
 // MessageHandler is a function that handles messages from Delta Exchange
@@ -36,10 +36,14 @@ type DeltaWebsocketClient struct {
 	subscriptions   map[string]bool
 	subscriptionsMu sync.RWMutex
 	totalMessages   int
+	logger          *zap.Logger
 }
 
 // NewDeltaWebsocketClient creates a new Delta Exchange websocket client
 func NewDeltaWebsocketClient(ctx context.Context, cfg *config.Delta) *DeltaWebsocketClient {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
 	clientCtx, cancel := context.WithCancel(ctx)
 
 	client := &DeltaWebsocketClient{
@@ -52,6 +56,7 @@ func NewDeltaWebsocketClient(ctx context.Context, cfg *config.Delta) *DeltaWebso
 		reconnectMax:   cfg.ReconnectMax,
 		reconnectDelay: 5 * time.Second,
 		subscriptions:  make(map[string]bool),
+		logger:         logger,
 	}
 
 	return client
@@ -59,9 +64,8 @@ func NewDeltaWebsocketClient(ctx context.Context, cfg *config.Delta) *DeltaWebso
 
 // Connect connects to the Delta Exchange websocket API
 func (c *DeltaWebsocketClient) Connect() error {
-	fmt.Println("Delta_WS: Connect: Attempting to connect to Delta Exchange...")
+	c.logger.Info("Attempting to connect to Delta Exchange", zap.String("url", c.url))
 
-	// First check if already connected (with lock)
 	c.mu.Lock()
 	if c.connected {
 		c.mu.Unlock()
@@ -69,18 +73,16 @@ func (c *DeltaWebsocketClient) Connect() error {
 	}
 	c.mu.Unlock()
 
-	fmt.Println("Delta_WS: Connect: connecting url:", c.url)
-	// Connect to the websocket (without holding the lock)
 	conn, _, err := websocket.DefaultDialer.Dial(c.url, nil)
 	if err != nil {
 		c.mu.Lock()
 		c.lastError = fmt.Sprintf("Failed to connect to Delta Exchange: %v", err)
 		c.lastErrorAt = time.Now()
 		c.mu.Unlock()
+		c.logger.Error("Failed to connect to Delta Exchange", zap.Error(err))
 		return fmt.Errorf("failed to connect to Delta Exchange: %w", err)
 	}
 
-	// Update connection state (with lock)
 	c.mu.Lock()
 	c.conn = conn
 	c.connected = true
@@ -88,17 +90,21 @@ func (c *DeltaWebsocketClient) Connect() error {
 	c.reconnectCount = 0
 	c.mu.Unlock()
 
-	// Start the read pump
+	c.logger.Info("Connected to Delta Exchange",
+		zap.String("url", c.url),
+		zap.Time("connected_at", c.connectedAt))
+
+	// Subscribe to configured channels
+	for _, channel := range c.channels {
+		c.logger.Info("Subscribing to channel", zap.String("channel", channel))
+		if err := c.Subscribe(channel, c.productIDs); err != nil {
+			c.logger.Error("Failed to subscribe to channel",
+				zap.String("channel", channel),
+				zap.Error(err))
+		}
+	}
+
 	go c.readPump()
-
-	// // Subscribe to channels (without holding the lock)
-	// for _, channel := range c.channels {
-	// 	fmt.Println("Delta_WS: Connect: Subscribing to channel:", channel)
-	// 	if err := c.Subscribe(channel, c.productIDs); err != nil {
-	// 		log.Printf("Failed to subscribe to channel %s: %v", channel, err)
-	// 	}
-	// }
-
 	return nil
 }
 
@@ -107,92 +113,104 @@ func (c *DeltaWebsocketClient) RegisterHandler(channel string, handler MessageHa
 	c.handlersMu.Lock()
 	defer c.handlersMu.Unlock()
 	c.handlers[channel] = handler
+	c.logger.Info("Registered handler for channel", zap.String("channel", channel))
 }
 
 // readPump reads messages from the websocket
 func (c *DeltaWebsocketClient) readPump() {
-	// Store a local reference to the connection to avoid race conditions
 	var conn *websocket.Conn
 	c.mu.RLock()
 	conn = c.conn
 	c.mu.RUnlock()
 
 	if conn == nil {
-		log.Println("Delta_WS: readPump: Connection is nil, cannot start read pump")
+		c.logger.Error("Connection is nil, cannot start read pump")
 		return
 	}
 
 	defer func() {
-		// Mark as disconnected
 		c.mu.Lock()
 		c.connected = false
 		c.mu.Unlock()
 
-		// Close the connection without holding the lock
 		if conn != nil {
 			conn.Close()
 		}
 
-		// Attempt to reconnect if the context is not canceled
 		select {
 		case <-c.ctx.Done():
+			c.logger.Info("Context canceled, stopping read pump")
 			return
 		default:
 			c.reconnect()
 		}
 	}()
 
+	c.logger.Info("Starting read pump", zap.String("url", c.url))
+
 	for {
 		_, message, err := conn.ReadMessage()
-		// fmt.Println("Delta_WS: readPump: Read message:", string(message))
 		if err != nil {
-			// Update error state with lock
 			c.mu.Lock()
 			c.lastError = fmt.Sprintf("Error reading from Delta Exchange: %v", err)
 			c.lastErrorAt = time.Now()
 			c.mu.Unlock()
+			c.logger.Error("Error reading message",
+				zap.Error(err),
+				zap.Time("timestamp", time.Now()))
 			return
 		}
 
-		// Parse the message to get the channel
+		// Log raw message for debugging
+		c.logger.Info("Raw message received from Delta",
+			zap.ByteString("message", message))
+
 		var msg map[string]interface{}
 		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("Error parsing message from Delta Exchange: %v", err)
+			c.logger.Error("Error parsing message",
+				zap.Error(err),
+				zap.ByteString("message", message))
 			continue
 		}
 
-		// Check for the new message format with payload.channels
 		var channel string
 		var msgProductID string
-		// if payload, ok := msg["payload"].(map[string]interface{}); ok {
-		// 	if channels, ok := payload["channels"].([]interface{}); ok && len(channels) > 0 {
-		// 		if channelMap, ok := channels[0].(map[string]interface{}); ok {
-		// 			if name, ok := channelMap["name"].(string); ok {
-		// 				channel = name
-		// 			}
-		// 		}
-		// 	}
-		// }
-		if msgType, ok := msg["type"].(string); ok {
-			channel = msgType
-		} else {
-			log.Printf("Delta_WS: readPump: msg does not contain a valid 'type' field: %v", msg)
+		// Try to get channel from payload.channels (for subscription confirmations)
+		if payload, ok := msg["payload"].(map[string]interface{}); ok {
+			if channels, ok := payload["channels"].([]interface{}); ok && len(channels) > 0 {
+				if channelMap, ok := channels[0].(map[string]interface{}); ok {
+					if name, ok := channelMap["name"].(string); ok {
+					channel = name
+					}
+				}
+			}
 		}
+		// Fallback to type field for data messages
+		if channel == "" {
+			if msgType, ok := msg["type"].(string); ok {
+				channel = msgType
+			} else {
+				c.logger.Warn("Message does not contain a valid 'type' or 'payload.channels' field",
+					zap.Any("message", msg))
+				continue
+			}
+		}
+		// Get product ID (handle both 'symbol' and 's')
 		if productId, ok := msg["symbol"].(string); ok {
 			msgProductID = productId
+		} else if s, ok := msg["s"].(string); ok {
+			msgProductID = s
 		} else {
-			log.Printf("Delta_WS: readPump: msg does not contain a valid 'type' field: %v", msg)
+			c.logger.Warn("Message does not contain a valid 'symbol' or 's' field",
+				zap.Any("message", msg))
 		}
 
-		// Call the handler for the channel
 		c.handlersMu.RLock()
 		c.totalMessages++
-		fmt.Println("Delta_WS: readPump: Channel:", channel, "product:", msgProductID, "Message count:", c.totalMessages)
-		// for ch := range c.handlers {
-		// 	fmt.Printf("Delta_WS: readPump: Registered handler for channel: %s\n", ch)
-		// }
-
-		// Every message has type, and based on that type (Channel name) we can call the handler.
+		c.logger.Info("Received message",
+			zap.String("channel", channel),
+			zap.String("product_id", msgProductID),
+			zap.Int("total_messages", c.totalMessages))
 		handler, ok := c.handlers[channel]
 		c.handlersMu.RUnlock()
 		if ok {
@@ -201,15 +219,13 @@ func (c *DeltaWebsocketClient) readPump() {
 	}
 }
 
-// subscribe subscribes to a channel
+// Subscribe subscribes to a channel
 func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) error {
-	// Use the product IDs as symbols
 	symbols := []string{"all"}
 	if len(productIDs) > 0 {
 		symbols = productIDs
 	}
 
-	// Create the subscription message using the new format
 	msg := map[string]interface{}{
 		"type": "subscribe",
 		"payload": map[string]interface{}{
@@ -222,47 +238,52 @@ func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) er
 		},
 	}
 
-	// Marshal the message
 	data, err := json.Marshal(msg)
 	if err != nil {
-		fmt.Println("Delta_WS: Subscribe: Error marshalling subscription message:", err)
+		c.logger.Error("Failed to marshal subscription message",
+			zap.Error(err),
+			zap.String("channel", channel))
 		return fmt.Errorf("failed to marshal subscription message: %w", err)
 	}
 
-	// Check connection status and get conn (with lock)
 	var conn *websocket.Conn
 	c.mu.RLock()
 	if !c.connected {
 		c.mu.RUnlock()
+		c.logger.Warn("Not connected to Delta Exchange", zap.String("channel", channel))
 		return fmt.Errorf("not connected to Delta Exchange")
 	}
 	conn = c.conn
 	c.mu.RUnlock()
 
-	// Send the message (without holding the lock)
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		c.logger.Error("Failed to send subscription message",
+			zap.Error(err),
+			zap.String("channel", channel))
 		return fmt.Errorf("failed to send subscription message: %w", err)
 	}
 
-	// Add the subscription
 	c.subscriptionsMu.Lock()
 	c.subscriptions[channel] = true
 	c.subscriptionsMu.Unlock()
 
+	c.logger.Info("Subscribed to channel",
+		zap.String("channel", channel),
+		zap.Strings("symbols", symbols))
 	return nil
 }
 
-// unsubscribe unsubscribes from a channel
+// Unsubscribe unsubscribes from a channel
 func (c *DeltaWebsocketClient) Unsubscribe(channel string) error {
-	// Check connection status and get conn (with lock)
 	c.mu.RLock()
 	if !c.connected {
 		c.mu.RUnlock()
+		c.logger.Warn("Not connected to Delta Exchange", zap.String("channel", channel))
 		return fmt.Errorf("not connected to Delta Exchange")
 	}
 	conn := c.conn
 	c.mu.RUnlock()
-	// Create the unsubscription message
+
 	msg := map[string]interface{}{
 		"type": "unsubscribe",
 		"payload": map[string]interface{}{
@@ -273,25 +294,32 @@ func (c *DeltaWebsocketClient) Unsubscribe(channel string) error {
 			},
 		},
 	}
-	// Marshal the message
+
 	data, err := json.Marshal(msg)
 	if err != nil {
+		c.logger.Error("Failed to marshal unsubscription message",
+			zap.Error(err),
+			zap.String("channel", channel))
 		return fmt.Errorf("failed to marshal unsubscription message: %w", err)
 	}
-	// Send the message (without holding the lock)
+
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		c.logger.Error("Failed to send unsubscription message",
+			zap.Error(err),
+			zap.String("channel", channel))
 		return fmt.Errorf("failed to send unsubscription message: %w", err)
 	}
-	// Remove the subscription
+
 	c.subscriptionsMu.Lock()
 	delete(c.subscriptions, channel)
 	c.subscriptionsMu.Unlock()
+
+	c.logger.Info("Unsubscribed from channel", zap.String("channel", channel))
 	return nil
 }
 
 // reconnect attempts to reconnect to the Delta Exchange websocket API
 func (c *DeltaWebsocketClient) reconnect() {
-	// Get the reconnect count with lock
 	c.mu.Lock()
 	c.reconnectCount++
 	reconnectCount := c.reconnectCount
@@ -299,39 +327,43 @@ func (c *DeltaWebsocketClient) reconnect() {
 	c.mu.Unlock()
 
 	if reconnectCount > reconnectMax {
-		log.Printf("Exceeded maximum reconnection attempts (%d)", reconnectMax)
+		c.logger.Error("Exceeded maximum reconnection attempts",
+			zap.Int("reconnect_count", reconnectCount),
+			zap.Int("reconnect_max", reconnectMax))
 		return
 	}
 
-	log.Printf("Reconnecting to Delta Exchange (attempt %d/%d)...", reconnectCount, reconnectMax)
+	c.logger.Info("Reconnecting to Delta Exchange",
+		zap.Int("attempt", reconnectCount),
+		zap.Int("max_attempts", reconnectMax))
 
-	// Sleep without holding any locks
 	time.Sleep(c.reconnectDelay)
 
-	// Connect without holding any locks
 	if err := c.Connect(); err != nil {
-		log.Printf("Failed to reconnect to Delta Exchange: %v", err)
+		c.logger.Error("Failed to reconnect to Delta Exchange", zap.Error(err))
 	}
 }
 
 // Close closes the connection to the Delta Exchange websocket API
 func (c *DeltaWebsocketClient) Close() error {
-	// Cancel the context first to signal all goroutines to stop
 	c.cancel()
 
-	// Get the connection with lock
 	var conn *websocket.Conn
 	c.mu.Lock()
 	conn = c.conn
 	c.connected = false
-	c.conn = nil // Clear the connection reference
+	c.conn = nil
 	c.mu.Unlock()
 
-	// Close the connection without holding the lock
 	if conn != nil {
-		return conn.Close()
+		err := conn.Close()
+		if err != nil {
+			c.logger.Error("Failed to close connection", zap.Error(err))
+		}
+		return err
 	}
 
+	c.logger.Info("Closed Delta Exchange connection")
 	return nil
 }
 
@@ -370,6 +402,6 @@ func (c *DeltaWebsocketClient) getSubscribedChannels() []string {
 		channels = append(channels, channel)
 	}
 
-	fmt.Println("Delta_WS: getSubscribedChannels: Subscribed channels:", channels)
+	c.logger.Info("Retrieved subscribed channels", zap.Strings("channels", channels))
 	return channels
 }

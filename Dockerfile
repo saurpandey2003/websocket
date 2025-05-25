@@ -1,38 +1,11 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
-
-# Set working directory
+FROM golang:1.20-alpine AS builder
 WORKDIR /app
-
-# Copy go.mod and go.sum files
-COPY go.mod go.sum ./
-
-# Download dependencies
-RUN go mod download
-
-# Copy the source code
 COPY . .
+RUN go build -o websocket-service main.go
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o websocket-service .
-
-# Final stage
+# Final image
 FROM alpine:latest
-
-# Set working directory
 WORKDIR /app
-
-# Install CA certificates
-RUN apk --no-cache add ca-certificates
-
-# Copy the binary from the builder stage
 COPY --from=builder /app/websocket-service .
-
-# Copy the configuration files
-COPY --from=builder /app/config ./config
-
-# Expose the HTTP and gRPC ports
-EXPOSE 8080 9090
-
-# Set the entry point
-ENTRYPOINT ["./websocket-service"]
+CMD ["./websocket-service"]

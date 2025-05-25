@@ -1,0 +1,6 @@
+services:
+  websocket-app:
+    build: .
+    command: ./websocket-service
+    ports:
+      - "8083:8083"
